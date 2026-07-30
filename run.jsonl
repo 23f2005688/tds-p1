@@ -1,6 +1,1 @@
-{"type": "incoming", "chat_id": 5556813487, "text": "What is the sum of 12 and 30? Reply with {\"answer\": ...}", "timestamp": 1785408331.0067651}
-{"type": "outgoing", "chat_id": 5556813487, "text": "{\"answer\": 42, \"log_url\": \"https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl\"}", "timestamp": 1785408331.0082822}
-{"type": "incoming", "chat_id": 5556813487, "text": "What is the sum of 12 and 30? Reply with {\"answer\": ...}", "timestamp": 1785408650.124079}
-{"type": "outgoing", "chat_id": 5556813487, "text": "{\"answer\": 42, \"log_url\": \"https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl\"}", "timestamp": 1785408650.12492}
-{"type": "incoming", "chat_id": 5556813487, "text": "\"Which state has the highest maternal mortality rate based on MOSPI data? Reply with ONLY a JSON object like {\\\"state\\\": \\\"<state name>\\\"}\"", "timestamp": 1785419793.2822714}
-{"type": "outgoing", "chat_id": 5556813487, "text": "{\"answer\": {\"state\": \"Assam\"}, \"log_url\": \"https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl\"}", "timestamp": 1785419793.2855394}
+
