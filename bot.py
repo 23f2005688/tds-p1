@@ -67,21 +67,24 @@ def log_event(event: dict):
 
 def push_log():
     try:
+        # Get onto a real branch instead of detached HEAD, and sync first
+        subprocess.run(["git", "fetch", "origin", "main"], check=False)
         subprocess.run(["git", "add", LOG_FILE], check=False)
-        subprocess.run(["git", "commit", "-m", "log update"], check=False)
-        # Explicitly specify origin main for automated environments
+        commit_res = subprocess.run(["git", "commit", "-m", "log update"], capture_output=True, text=True)
+        print(f"[Git Commit]: {commit_res.stdout} {commit_res.stderr}")
+
+        # Rebase local commit on top of latest remote before pushing
+        subprocess.run(["git", "rebase", "origin/main"], check=False)
+
         push_res = subprocess.run(
-            ["git", "push", "origin", "HEAD:main"], 
-            capture_output=True, 
-            text=True
+            ["git", "push", "origin", "HEAD:main"],
+            capture_output=True, text=True
         )
-        if push_res.returncode != 0:
-            print(f"[Git Push Error]: {push_res.stderr}")
-        else:
-            print("[Git Push Success]")
+        print(f"[Git Push Return Code]: {push_res.returncode}")
+        print(f"[Git Push STDOUT]: {push_res.stdout}")
+        print(f"[Git Push STDERR]: {push_res.stderr}")
     except Exception as e:
         print(f"[Git Exception]: {e}")
-
 # ---------------- Telegram Handler ----------------
 DRY_RUN = False 
 
