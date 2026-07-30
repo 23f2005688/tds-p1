@@ -18,6 +18,15 @@ client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
 LOG_FILE = "run.jsonl"
 
 conversation_history = {}
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")  # e.g. "23f2005688/tds-p1"
+
+def configure_git():
+    if GITHUB_TOKEN and GITHUB_REPO:
+        remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=False)
+        subprocess.run(["git", "config", "user.email", "bot@example.com"], check=False)
+        subprocess.run(["git", "config", "user.name", "bot"], check=False)
 
 # throttle git pushes so we're not committing on every single message
 _events_since_push = 0
@@ -103,4 +112,5 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 print("Bot is running... (Ctrl+C to stop)")
+configure_git()
 app.run_polling()
