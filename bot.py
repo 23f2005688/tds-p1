@@ -20,7 +20,30 @@ LOG_FILE = "run.jsonl"
 conversation_history = {}
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")  # e.g. "23f2005688/tds-p1"
+from flask import Flask
+from threading import Thread
+import requests
 
+flask_app = Flask(__name__)
+
+@flask_app.route("/health")
+def health():
+    return {"ok": True}
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port)
+
+def self_ping():
+    base_url = os.getenv("BASE_URL")
+    if not base_url:
+        return
+    while True:
+        time.sleep(600)  # every 10 minutes
+        try:
+            requests.get(f"{base_url}/health", timeout=10)
+        except Exception:
+            pass
 def configure_git():
     if GITHUB_TOKEN and GITHUB_REPO:
         remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
@@ -109,6 +132,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(final_reply)
 
     push_log()
+Thread(target=run_flask, daemon=True).start()
+Thread(target=self_ping, daemon=True).start()
+
 app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 print("Bot is running... (Ctrl+C to stop)")
