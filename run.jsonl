@@ -25,3 +25,6 @@
 {"type": "incoming", "chat_id": 801727819, "text": "Which state has the highest maternal mortality rate based on MOSPI data? Reply with ONLY a JSON object like {\\\"state\\\": \\\"<state name>\\\"}", "timestamp": 1785438504.3223472}
 {"type": "json_parse_failed", "chat_id": 801727819, "raw_model_reply": "{\"state\":\"Rajasthan\"}", "timestamp": 1785438505.0797355}
 {"type": "outgoing", "chat_id": 801727819, "text": "{\"answer\": {\"state\": \"Telangana\"}, \"log_url\": \"https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl\"}", "timestamp": 1785438506.1694875}
+{"type": "incoming", "chat_id": 801727819, "text": "What is 17 * 23? Reply with ONLY a JSON object like {\"value\": <number>}", "timestamp": 1785438523.6182656}
+{"type": "json_parse_failed", "chat_id": 801727819, "raw_model_reply": "{\"value\": 391}", "timestamp": 1785438524.3980281}
+{"type": "outgoing", "chat_id": 801727819, "text": "{\"answer\": {\"value\": 391}, \"log_url\": \"https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl\"}", "timestamp": 1785438525.3883445}
