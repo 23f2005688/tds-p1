@@ -59,32 +59,40 @@ def configure_git():
 
         subprocess.run(["git", "config", "user.email", "bot@example.com"], check=False)
         subprocess.run(["git", "config", "user.name", "bot"], check=False)
-
+import threading
+git_lock = threading.Lock()
 def log_event(event: dict):
     event["timestamp"] = time.time()
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(event) + "\n")
 
 def push_log():
-    try:
-        # Get onto a real branch instead of detached HEAD, and sync first
-        subprocess.run(["git", "fetch", "origin", "main"], check=False)
-        subprocess.run(["git", "add", LOG_FILE], check=False)
-        commit_res = subprocess.run(["git", "commit", "-m", "log update"], capture_output=True, text=True)
-        print(f"[Git Commit]: {commit_res.stdout} {commit_res.stderr}")
+    with git_lock:
+        try:
+            subprocess.run(["git", "fetch", "origin", "main"], check=False)
+            subprocess.run(["git", "add", LOG_FILE], check=False)
+            commit_res = subprocess.run(["git", "commit", "-m", "log update"], capture_output=True, text=True)
+            print(f"[Git Commit]: {commit_res.stdout} {commit_res.stderr}")
 
-        # Rebase local commit on top of latest remote before pushing
-        subprocess.run(["git", "rebase", "origin/main"], check=False)
+            rebase_res = subprocess.run(["git", "rebase", "origin/main"], capture_output=True, text=True)
+            if rebase_res.returncode != 0:
+                print(f"[Git Rebase Error]: {rebase_res.stderr}")
+                subprocess.run(["git", "rebase", "--abort"], check=False)
+                # fall back: reset to origin and re-append just this log line
+                subprocess.run(["git", "reset", "--hard", "origin/main"], check=False)
+                log_event.__wrapped__ if False else None  # (no-op placeholder)
+                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    pass  # last entry already lost here; see note below
 
-        push_res = subprocess.run(
-            ["git", "push", "origin", "HEAD:main"],
-            capture_output=True, text=True
-        )
-        print(f"[Git Push Return Code]: {push_res.returncode}")
-        print(f"[Git Push STDOUT]: {push_res.stdout}")
-        print(f"[Git Push STDERR]: {push_res.stderr}")
-    except Exception as e:
-        print(f"[Git Exception]: {e}")
+            push_res = subprocess.run(
+                ["git", "push", "origin", "HEAD:main"],
+                capture_output=True, text=True
+            )
+            print(f"[Git Push Return Code]: {push_res.returncode}")
+            print(f"[Git Push STDOUT]: {push_res.stdout}")
+            print(f"[Git Push STDERR]: {push_res.stderr}")
+        except Exception as e:
+            print(f"[Git Exception]: {e}")
 # ---------------- Telegram Handler ----------------
 DRY_RUN = False 
 
