@@ -49,7 +49,6 @@ def self_ping():
 def configure_git():
     if GITHUB_TOKEN and GITHUB_REPO:
         remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-        
         # Check if 'origin' already exists
         check_origin = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True)
         
