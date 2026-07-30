@@ -11,7 +11,7 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
-LOG_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/run.jsonl"  # <-- fill this in for real
+LOG_URL = "https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl"  
 # -------------------------------------------
 
 client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
