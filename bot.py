@@ -51,15 +51,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     system_prompt = (
         "You are a careful data analyst. The user's LAST message asks a data-analysis "
-        "question and tells you exactly what JSON shape to reply with. Work out the "
-        "real answer (use any public data you know, e.g. MOSPI statistics, general "
-        "world knowledge, or arithmetic on numbers given in the message). "
-        "Reply with ONLY that exact JSON object and absolutely nothing else — no "
-        "explanation, no markdown, no code fences, just the raw JSON."
+        "question. Work out the real answer (use any public data you know, e.g. MOSPI "
+        "statistics, general world knowledge, or arithmetic on numbers given in the "
+        "message), shaped exactly as the question specifies. "
+        "Reply with ONLY a JSON object with exactly two top-level keys: "
+        "\"answer\" (containing your answer in the exact shape requested — this may "
+        "itself be a nested object, a string, a number, etc., depending on what the "
+        "question asks for) and \"log_url\" (leave this as the string \"PLACEHOLDER\" "
+        "— it will be replaced automatically). "
+        "No explanation, no markdown, no code fences — just the raw JSON, nothing else."
     )
 
     if DRY_RUN:
-        reply_text = '{"answer": 42}'
+        reply_text = '{"answer": {"state": "Assam"}, "log_url": "PLACEHOLDER"}'
     else:
         try:
             response = client.chat.completions.create(
@@ -71,6 +75,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_event({"type": "error", "chat_id": chat_id, "error": str(e)})
             await update.message.reply_text(json.dumps({"error": "internal_error", "log_url": LOG_URL}))
             return
+
     history.append({"role": "assistant", "content": reply_text})
 
     try:
@@ -81,16 +86,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed = json.loads(reply_text[start:end + 1])
         except (json.JSONDecodeError, ValueError):
             log_event({"type": "parse_error", "chat_id": chat_id, "raw": reply_text})
-            parsed = {"error": "could_not_parse"}
+            parsed = {"answer": None}
 
-    parsed["log_url"] = LOG_URL
-    final_reply = json.dumps(parsed)
+    # Always force the correct log_url — never trust the model's placeholder,
+    # and always ensure only the two required top-level keys exist.
+    final_parsed = {
+        "answer": parsed.get("answer"),
+        "log_url": LOG_URL,
+    }
+    final_reply = json.dumps(final_parsed)
 
     log_event({"type": "outgoing", "chat_id": chat_id, "text": final_reply})
     await update.message.reply_text(final_reply)
 
     push_log()
-
 app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 print("Bot is running... (Ctrl+C to stop)")
