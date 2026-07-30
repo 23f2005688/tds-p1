@@ -53,7 +53,7 @@ def configure_git():
 
 # throttle git pushes so we're not committing on every single message
 _events_since_push = 0
-PUSH_EVERY_N_EVENTS = 4
+PUSH_EVERY_N_EVENTS = 1
 
 def log_event(event: dict):
     event["timestamp"] = time.time()
@@ -61,11 +61,6 @@ def log_event(event: dict):
         f.write(json.dumps(event) + "\n")
 
 def push_log():
-    global _events_since_push
-    _events_since_push += 1
-    if _events_since_push < PUSH_EVERY_N_EVENTS:
-        return
-    _events_since_push = 0
     try:
         subprocess.run(["git", "add", LOG_FILE], check=True)
         subprocess.run(["git", "commit", "-m", "log update"], check=True)
