@@ -2,28 +2,28 @@ import json
 import time
 import os
 import subprocess
+import requests
+from threading import Thread
+from dotenv import load_dotenv
+from flask import Flask
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-from dotenv import load_dotenv
 
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
-LOG_URL = "https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl"  
-# -------------------------------------------
+LOG_URL = "https://raw.githubusercontent.com/23f2005688/tds-p1/refs/heads/main/run.jsonl"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")  # e.g., "23f2005688/tds-p1"
+
+LOG_FILE = "run.jsonl"
+conversation_history = {}
 
 client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
-LOG_FILE = "run.jsonl"
 
-conversation_history = {}
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")  # e.g. "23f2005688/tds-p1"
-from flask import Flask
-from threading import Thread
-import requests
-
+# ---------------- Flask Server for Render Health Check ----------------
 flask_app = Flask(__name__)
 
 @flask_app.route("/health")
@@ -44,16 +44,22 @@ def self_ping():
             requests.get(f"{base_url}/health", timeout=10)
         except Exception:
             pass
+
+# ---------------- Git & Logging Helpers ----------------
 def configure_git():
     if GITHUB_TOKEN and GITHUB_REPO:
         remote_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-        subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=False)
+        
+        # Check if 'origin' already exists
+        check_origin = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True)
+        
+        if check_origin.returncode != 0:
+            subprocess.run(["git", "remote", "add", "origin", remote_url], check=False)
+        else:
+            subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=False)
+
         subprocess.run(["git", "config", "user.email", "bot@example.com"], check=False)
         subprocess.run(["git", "config", "user.name", "bot"], check=False)
-
-# throttle git pushes so we're not committing on every single message
-_events_since_push = 0
-PUSH_EVERY_N_EVENTS = 1
 
 def log_event(event: dict):
     event["timestamp"] = time.time()
@@ -62,12 +68,24 @@ def log_event(event: dict):
 
 def push_log():
     try:
-        subprocess.run(["git", "add", LOG_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "log update"], check=True)
-        subprocess.run(["git", "push"], check=True)
-    except subprocess.CalledProcessError:
-        pass  # nothing new to commit, or push failed — don't crash the bot
-DRY_RUN = False  # set to False only for your final real test / submission
+        subprocess.run(["git", "add", LOG_FILE], check=False)
+        subprocess.run(["git", "commit", "-m", "log update"], check=False)
+        # Explicitly specify origin main for automated environments
+        push_res = subprocess.run(
+            ["git", "push", "origin", "main"], 
+            capture_output=True, 
+            text=True
+        )
+        if push_res.returncode != 0:
+            print(f"[Git Push Error]: {push_res.stderr}")
+        else:
+            print("[Git Push Success]")
+    except Exception as e:
+        print(f"[Git Exception]: {e}")
+
+# ---------------- Telegram Handler ----------------
+DRY_RUN = False 
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
@@ -94,7 +112,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         try:
             response = client.chat.completions.create(
-                model="gpt-5-mini",
+                model="gpt-4o-mini",
                 messages=[{"role": "system", "content": system_prompt}] + history[-6:],
             )
             reply_text = response.choices[0].message.content.strip()
@@ -115,8 +133,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_event({"type": "parse_error", "chat_id": chat_id, "raw": reply_text})
             parsed = {"answer": None}
 
-    # Always force the correct log_url — never trust the model's placeholder,
-    # and always ensure only the two required top-level keys exist.
     final_parsed = {
         "answer": parsed.get("answer"),
         "log_url": LOG_URL,
@@ -126,12 +142,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event({"type": "outgoing", "chat_id": chat_id, "text": final_reply})
     await update.message.reply_text(final_reply)
 
+    # Push to GitHub on every event
     push_log()
-Thread(target=run_flask, daemon=True).start()
-Thread(target=self_ping, daemon=True).start()
 
-app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-print("Bot is running... (Ctrl+C to stop)")
-configure_git()
-app.run_polling()
+# ---------------- Application Entrypoint ----------------
+if __name__ == "__main__":
+    # 1. Configure Git BEFORE polling starts
+    configure_git()
+
+    # 2. Start web server threads
+    Thread(target=run_flask, daemon=True).start()
+    Thread(target=self_ping, daemon=True).start()
+
+    # 3. Start Telegram Bot
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    print("Bot is running... (Ctrl+C to stop)")
+    app.run_polling()
