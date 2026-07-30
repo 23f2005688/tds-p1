@@ -25,7 +25,7 @@ PUSH_EVERY_N_EVENTS = 4
 
 def log_event(event: dict):
     event["timestamp"] = time.time()
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(event) + "\n")
 
 def push_log():
