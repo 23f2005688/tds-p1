@@ -1,32 +1,45 @@
 import json
 import time
 import os
+import subprocess
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-
-# --- fill these in with your own values ---
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
-LOG_URL = "PASTE_YOUR_PUBLIC_LOG_URL_HERE"  # see Step 5 — where run.jsonl will be hosted
+LOG_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/run.jsonl"  # <-- fill this in for real
 # -------------------------------------------
 
 client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
 LOG_FILE = "run.jsonl"
 
-# Keeps the last few messages per chat, so multi-turn questions work —
-# "answer the LAST message" still needs the earlier ones for context.
 conversation_history = {}
+
+# throttle git pushes so we're not committing on every single message
+_events_since_push = 0
+PUSH_EVERY_N_EVENTS = 4
 
 def log_event(event: dict):
     event["timestamp"] = time.time()
     with open(LOG_FILE, "a") as f:
         f.write(json.dumps(event) + "\n")
+
+def push_log():
+    global _events_since_push
+    _events_since_push += 1
+    if _events_since_push < PUSH_EVERY_N_EVENTS:
+        return
+    _events_since_push = 0
+    try:
+        subprocess.run(["git", "add", LOG_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "log update"], check=True)
+        subprocess.run(["git", "push"], check=True)
+    except subprocess.CalledProcessError:
+        pass  # nothing new to commit, or push failed — don't crash the bot
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -36,8 +49,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history = conversation_history.setdefault(chat_id, [])
     history.append({"role": "user", "content": user_text})
 
-    # Ask the AI to work out the answer. The system prompt tells it exactly how to
-    # format the final reply — this is the part that MUST match what the question asked.
     system_prompt = (
         "You are a careful data analyst. The user's LAST message asks a data-analysis "
         "question and tells you exactly what JSON shape to reply with. Work out the "
@@ -46,27 +57,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Reply with ONLY that exact JSON object and absolutely nothing else — no "
         "explanation, no markdown, no code fences, just the raw JSON."
     )
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[{"role": "system", "content": system_prompt}] + history[-6:],
-    )
-    reply_text = response.choices[0].message.content.strip()
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "system", "content": system_prompt}] + history[-6:],
+        )
+        reply_text = response.choices[0].message.content.strip()
+    except Exception as e:
+        log_event({"type": "error", "chat_id": chat_id, "error": str(e)})
+        await update.message.reply_text(json.dumps({"error": "internal_error", "log_url": LOG_URL}))
+        return
+
     history.append({"role": "assistant", "content": reply_text})
 
-    # Make sure we actually reply with valid JSON containing "log_url" — if the model
-    # forgot the log_url field or wrapped it in markdown, fix it up here so the grader
-    # never sees a malformed reply.
     try:
         parsed = json.loads(reply_text)
     except json.JSONDecodeError:
-        # Model added extra text — try to pull out just the {...} part.
-        start, end = reply_text.find("{"), reply_text.rfind("}")
-        parsed = json.loads(reply_text[start:end + 1])
+        try:
+            start, end = reply_text.find("{"), reply_text.rfind("}")
+            parsed = json.loads(reply_text[start:end + 1])
+        except (json.JSONDecodeError, ValueError):
+            log_event({"type": "parse_error", "chat_id": chat_id, "raw": reply_text})
+            parsed = {"error": "could_not_parse"}
+
     parsed["log_url"] = LOG_URL
     final_reply = json.dumps(parsed)
 
     log_event({"type": "outgoing", "chat_id": chat_id, "text": final_reply})
     await update.message.reply_text(final_reply)
+
+    push_log()
 
 app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
