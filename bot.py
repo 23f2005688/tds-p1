@@ -40,7 +40,7 @@ def push_log():
         subprocess.run(["git", "push"], check=True)
     except subprocess.CalledProcessError:
         pass  # nothing new to commit, or push failed — don't crash the bot
-
+DRY_RUN = True  # set to False only for your final real test / submission
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
@@ -58,17 +58,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "explanation, no markdown, no code fences, just the raw JSON."
     )
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=[{"role": "system", "content": system_prompt}] + history[-6:],
-        )
-        reply_text = response.choices[0].message.content.strip()
-    except Exception as e:
-        log_event({"type": "error", "chat_id": chat_id, "error": str(e)})
-        await update.message.reply_text(json.dumps({"error": "internal_error", "log_url": LOG_URL}))
-        return
-
+    if DRY_RUN:
+        reply_text = '{"answer": 42}'
+    else:
+        try:
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "system", "content": system_prompt}] + history[-6:],
+            )
+            reply_text = response.choices[0].message.content.strip()
+        except Exception as e:
+            log_event({"type": "error", "chat_id": chat_id, "error": str(e)})
+            await update.message.reply_text(json.dumps({"error": "internal_error", "log_url": LOG_URL}))
+            return
     history.append({"role": "assistant", "content": reply_text})
 
     try:
