@@ -40,7 +40,7 @@ def push_log():
         subprocess.run(["git", "push"], check=True)
     except subprocess.CalledProcessError:
         pass  # nothing new to commit, or push failed — don't crash the bot
-DRY_RUN = True  # set to False only for your final real test / submission
+DRY_RUN = False  # set to False only for your final real test / submission
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
