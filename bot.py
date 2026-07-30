@@ -71,7 +71,7 @@ def push_log():
         subprocess.run(["git", "commit", "-m", "log update"], check=False)
         # Explicitly specify origin main for automated environments
         push_res = subprocess.run(
-            ["git", "push", "origin", "main"], 
+            ["git", "push", "origin", "HEAD:main"], 
             capture_output=True, 
             text=True
         )
