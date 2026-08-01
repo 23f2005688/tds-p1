@@ -22,6 +22,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")  # e.g., "23f2005688/tds-p1"
 
 LOG_FILE = "run.jsonl"
+MAX_LOG_ENTRIES = 10  # Keeps only the recent logs to prevent infinite growth
 DRY_RUN = False
 
 # In-memory conversation history
@@ -89,20 +90,37 @@ def configure_git():
     subprocess.run(["git", "config", "user.name", "bot"], check=False)
 
 
-def log_event(event: dict):
-    """
-    Append a JSON line to run.jsonl safely.
-    """
-    event["timestamp"] = time.time()
-    with log_lock:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
-
-
 def ensure_log_file_exists():
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w", encoding="utf-8") as f:
             pass
+
+
+def log_event(event: dict):
+    """
+    Append a JSON line to run.jsonl safely and trim to MAX_LOG_ENTRIES.
+    """
+    event["timestamp"] = time.time()
+    with log_lock:
+        # Read existing entries if any
+        logs = []
+        if os.path.exists(LOG_FILE):
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        logs.append(line.strip())
+        
+        # Append new event
+        logs.append(json.dumps(event, ensure_ascii=False))
+        
+        # Keep only the most recent N entries
+        if len(logs) > MAX_LOG_ENTRIES:
+            logs = logs[-MAX_LOG_ENTRIES:]
+            
+        # Write back trimmed logs
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            for log in logs:
+                f.write(log + "\n")
 
 
 def git_sync_and_push():
@@ -111,40 +129,28 @@ def git_sync_and_push():
     - fetch/pull with rebase disabled to avoid losing local changes
     - commit only if there are changes
     - push
-
-    We avoid `git rebase` + hard resets because they can wipe log lines.
     """
     if not (GITHUB_TOKEN and GITHUB_REPO):
         return
 
     with git_lock:
-        # Make sure repo exists
         subprocess.run(["git", "status"], check=False, capture_output=True, text=True)
-
-        # Fetch remote
         subprocess.run(["git", "fetch", "origin", "main"], check=False, capture_output=True, text=True)
-
-        # Pull latest safely (merge if needed). We don't hard reset.
         subprocess.run(
             ["git", "pull", "--no-rebase", "origin", "main"],
             check=False,
             capture_output=True,
             text=True
         )
-
-        # Stage log file
         subprocess.run(["git", "add", LOG_FILE], check=False, capture_output=True, text=True)
-
-        # Commit only if changes exist
-        commit_res = subprocess.run(
+        
+        subprocess.run(
             ["git", "commit", "-m", "log update"],
             check=False,
             capture_output=True,
             text=True
         )
 
-        # If nothing to commit, stdout includes "nothing to commit"
-        # Still try pushing; it will be fast no-op.
         push_res = subprocess.run(
             ["git", "push", "origin", "HEAD:main"],
             check=False,
@@ -152,34 +158,18 @@ def git_sync_and_push():
             text=True
         )
 
-        # Optional debug logging (to stdout only)
         if push_res.returncode != 0:
             print("[Git Push Error]", push_res.stderr)
-        # else: success
 
 
 def push_worker():
-    """
-    Background worker that pushes when triggered.
-    Batches frequent updates.
-    """
-    # Initial delay so git is ready
     time.sleep(2)
-
     while not push_thread_stop.is_set():
-        # Wait until we have something to push
         push_queue_event.wait(timeout=5)
-
         if push_thread_stop.is_set():
             break
-
-        # Clear event
         push_queue_event.clear()
-
-        # Batch: wait briefly for more logs to accumulate
         time.sleep(2)
-
-        # Only push if file exists and has some content
         try:
             ensure_log_file_exists()
             if os.path.getsize(LOG_FILE) > 0:
@@ -196,29 +186,38 @@ BASE_SYSTEM_PROMPT = (
     "Reply with ONLY a JSON object with exactly two top-level keys:\n"
     "\"answer\" (containing your answer in the exact shape requested) and \"log_url\" "
     "(leave this as the string \"PLACEHOLDER\").\n"
-    "No explanation, no markdown, no code fences — just the raw JSON."
+    "No explanation, no markdown code blocks, no backticks — just the raw JSON."
 )
 
 JSON_RETRY_PROMPT = (
-    "Your previous output was not valid JSON or did not match the required format. "
-    "Return ONLY valid JSON with exactly two top-level keys: "
+    "Your previous output failed JSON parsing because it included markdown fences or invalid syntax. "
+    "Return ONLY valid raw JSON with exactly two top-level keys: "
     "\"answer\" and \"log_url\". "
     "Set \"log_url\" to \"PLACEHOLDER\". "
-    "No other text."
+    "Do NOT wrap the JSON in markdown code blocks like ```json ... ```. No other text."
 )
 
 
 def extract_json_object(text: str):
     """
-    Best-effort extraction of a JSON object from text.
+    Best-effort extraction of a JSON object from text, stripping markdown if present.
     """
     if not text:
         return None
-    start = text.find("{")
-    end = text.rfind("}")
+    
+    cleaned = text.strip()
+    # Strip markdown code blocks if the model included them anyway
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        # Remove first line (e.g. ```json) and last line (```)
+        if len(lines) >= 2:
+            cleaned = "\n".join(lines[1:-1]).strip()
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return None
-    candidate = text[start:end + 1].strip()
+    candidate = cleaned[start:end + 1].strip()
     return candidate
 
 
@@ -229,7 +228,6 @@ def safe_parse_reply(reply_text: str):
     try:
         return json.loads(reply_text)
     except json.JSONDecodeError:
-        # try extraction
         candidate = extract_json_object(reply_text)
         if candidate:
             try:
@@ -248,14 +246,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     history = conversation_history.setdefault(chat_id, [])
     history.append({"role": "user", "content": user_text})
-
-    # Keep only last few messages to reduce context noise
     history_tail = history[-6:]
 
     if DRY_RUN:
         reply_text = '{"answer": {"state": "Assam"}, "log_url": "PLACEHOLDER"}'
     else:
-        # Call model
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -267,7 +262,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(json.dumps({"error": "internal_error", "log_url": LOG_URL}))
             return
 
-        # Parse + retry if invalid JSON / missing keys
         parsed = safe_parse_reply(reply_text)
         needs_retry = (
             parsed is None
@@ -283,7 +277,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "raw_model_reply": reply_text
             })
 
-            # Retry asking for strict valid JSON only
             try:
                 retry_response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -299,10 +292,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 log_event({"type": "retry_error", "chat_id": chat_id, "error": str(e)})
 
         if parsed is None:
-            # As a last resort, reply with null but log why
             parsed = {"answer": None, "log_url": "PLACEHOLDER"}
 
-    # Normalize output format
     final_parsed = {
         "answer": parsed.get("answer"),
         "log_url": LOG_URL,
@@ -310,10 +301,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     final_reply = json.dumps(final_parsed)
 
-    # Log outgoing
     log_event({"type": "outgoing", "chat_id": chat_id, "text": final_reply})
-
-    # Queue push (batched)
     push_queue_event.set()
 
     await update.message.reply_text(final_reply)
@@ -321,20 +309,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Application Entrypoint ----------------
 if __name__ == "__main__":
-    # 1) Configure git before polling
     configure_git()
     ensure_log_file_exists()
-
-    # 2) Start web server & health ping
+    port = int(os.environ.get("PORT", 10000))
+    
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=self_ping, daemon=True).start()
-
-    # 3) Start background push worker
     threading.Thread(target=push_worker, daemon=True).start()
 
-    # 4) Start Telegram Bot
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
+    app.run(host="0.0.0.0", port=port)
     print("Bot is running... (Ctrl+C to stop)")
     app.run_polling(drop_pending_updates=True)
