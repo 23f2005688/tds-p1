@@ -31,6 +31,9 @@ client = OpenAI(base_url="https://aipipe.org/openai/v1", api_key=AIPIPE_TOKEN)
 
 # ---------------- Flask Server for Render Health Check ----------------
 flask_app = Flask(__name__)
+@flask_app.route("/")
+def home():
+    return "Bot is active and running!", 200
 
 @flask_app.route("/health")
 def health():
