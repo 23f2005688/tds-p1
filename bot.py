@@ -312,13 +312,12 @@ if __name__ == "__main__":
     configure_git()
     ensure_log_file_exists()
     port = int(os.environ.get("PORT", 10000))
-    
+    flask_app.run(host="0.0.0.0", port=port)
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=self_ping, daemon=True).start()
     threading.Thread(target=push_worker, daemon=True).start()
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    flask_app.run(host="0.0.0.0", port=port)
     print("Bot is running... (Ctrl+C to stop)")
     app.run_polling(drop_pending_updates=True)
