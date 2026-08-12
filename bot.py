@@ -279,7 +279,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             try:
                 retry_response = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-5.6-sol",
                     messages=[
                         {"role": "system", "content": BASE_SYSTEM_PROMPT},
                         {"role": "user", "content": history_tail[-1]["content"]},
