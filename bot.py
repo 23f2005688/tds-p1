@@ -253,7 +253,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         try:
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5.6-sol",
                 messages=[{"role": "system", "content": BASE_SYSTEM_PROMPT}] + history_tail,
             )
             reply_text = response.choices[0].message.content.strip()
